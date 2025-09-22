@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>CV Parsing Kosten Calculator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    label { display: block; margin-top: 15px; }
+    select, input { padding: 5px; margin-top: 5px; }
+    .result { margin-top: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <h2>CV Parsing Kosten Calculator</h2>
+  
+  <label>
+    Aantal CV's:
+    <input type="number" id="nCv" value="1000">
+  </label>
+  
+  <label>
+    Parsing type:
+    <select id="parsingType">
+      <option value="keywords">Keywords</option>
+      <option value="exp">Werkervaring & Opleiding</option>
+    </select>
+  </label>
+  
+  <label>
+    Model:
+    <select id="modelSelect"></select>
+  </label>
+  
+  <div class="result" id="result"></div>
+  
+  <script>
+    // Gemiddelde tokens per CV (op basis van jouw runs)
+    const TOKEN_COUNTS = {
+      keywords: { input: 2833, output: 135 },
+      exp: { input: 9640, output: 833 }
+    };
+
+    // Prijzen per model (USD per miljoen tokens: input, output)
+    let MODEL_PRICES = {
+      "GPT-4o": { input: 5, output: 15 },
+      "GPT-4o-mini": { input: 0.15, output: 0.60 },
+      "GPT-4.1": { input: 2, output: 8 },
+      "GPT-4.1 mini": { input: 0.40, output: 1.60 },
+      "GPT-4.1 nano": { input: 0.10, output: 0.40 }
+    };
+
+    const USD_TO_EUR = 0.92; // Wisselkoers
+
+    // Dropdown vullen
+    const modelSelect = document.getElementById("modelSelect");
+    for (let model in MODEL_PRICES) {
+      let opt = document.createElement("option");
+      opt.value = model;
+      opt.textContent = model;
+      modelSelect.appendChild(opt);
+    }
+
+    function calculate() {
+      const nCv = parseInt(document.getElementById("nCv").value) || 0;
+      const parsing = document.getElementById("parsingType").value;
+      const model = document.getElementById("modelSelect").value;
+
+      const tokens = TOKEN_COUNTS[parsing];
+      const totalInput = tokens.input * nCv;
+      const totalOutput = tokens.output * nCv;
+
+      const prices = MODEL_PRICES[model];
+      const costUSD = (totalInput/1_000_000)*prices.input + (totalOutput/1_000_000)*prices.output;
+      const costEUR = costUSD * USD_TO_EUR;
+
+      document.getElementById("result").innerHTML = `
+        <b>Resultaat:</b><br>
+        Model: ${model}<br>
+        Parsing type: ${parsing === "keywords" ? "Keywords" : "Werkervaring & Opleiding"}<br>
+        Aantal CV's: ${nCv}<br>
+        Input tokens totaal: ${totalInput.toLocaleString()}<br>
+        Output tokens totaal: ${totalOutput.toLocaleString()}<br>
+        Kosten: $${costUSD.toFixed(2)} ≈ €${costEUR.toFixed(2)}
+      `;
+    }
+
+    document.querySelectorAll("input, select").forEach(el => el.addEventListener("input", calculate));
+    calculate();
+  </script>
+</body>
+</html>
