@@ -8,16 +8,17 @@
     label { display: block; margin-top: 15px; }
     select, input { padding: 5px; margin-top: 5px; }
     .result { margin-top: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+    .muted { color: #666; font-size: 12px; margin-top: 6px; }
   </style>
 </head>
 <body>
   <h2>CV Parsing Kosten Calculator</h2>
-  
+
   <label>
     Aantal CV's:
     <input type="number" id="nCv" value="1000">
   </label>
-  
+
   <label>
     Parsing type:
     <select id="parsingType">
@@ -25,14 +26,14 @@
       <option value="exp">Werkervaring & Opleiding</option>
     </select>
   </label>
-  
+
   <label>
     Model:
     <select id="modelSelect"></select>
   </label>
-  
+
   <div class="result" id="result"></div>
-  
+
   <script>
     // Gemiddelde tokens per CV (op basis van jouw runs)
     const TOKEN_COUNTS = {
@@ -40,24 +41,89 @@
       exp: { input: 9640, output: 833 }
     };
 
-    // Prijzen per model (USD per miljoen tokens: input, output)
+    // Actuele prijzen per model (USD per 1M tokens: input, output)
+    // Bron: OpenAI API Pricing (prijzen per 1M tokens). https://openai.com/api/pricing/
+    // - GPT-5.2: input 1.75, output 14.00
+    // - GPT-4.1: input 3.00, output 12.00
+    // - GPT-4.1 mini: input 0.80, output 3.20
+    // - GPT-4.1 nano: input 0.20, output 0.80
+    // - GPT-5 nano: input 0.05, output 0.40 (modelpagina)
     let MODEL_PRICES = {
-      "GPT-4o": { input: 5, output: 15 },
-      "GPT-4o-mini": { input: 0.15, output: 0.60 },
-      "GPT-4.1": { input: 2, output: 8 },
-      "GPT-4.1 mini": { input: 0.40, output: 1.60 },
-      "GPT-4.1 nano": { input: 0.10, output: 0.40 }
+      "gpt-5.2":       { input: 1.75, output: 14.00 }, // OpenAI pricing
+      "gpt-5-nano":    { input: 0.05, output: 0.40 },  // OpenAI model page
+
+      "gpt-4.1":       { input: 3.00, output: 12.00 }, // OpenAI pricing
+      "gpt-4.1-mini":  { input: 0.80, output: 3.20 },  // OpenAI pricing
+      "gpt-4.1-nano":  { input: 0.20, output: 0.80 }   // OpenAI pricing
     };
 
-    const USD_TO_EUR = 0.92; // Wisselkoers
+    // USD -> EUR koers (automatisch)
+    // We gebruiken Frankfurter (ECB reference rates, geen API key, geschikt voor browser).
+    // Endpoint: https://api.frankfurter.app/latest?from=USD&to=EUR
+    const FX_ENDPOINT = "https://api.frankfurter.app/latest?from=USD&to=EUR";
+    const FX_STORAGE_KEY = "usd_to_eur_rate_cache_v1";
+    const FX_DATE_KEY = "usd_to_eur_date_cache_v1";
 
-    // Dropdown vullen
+    // Fallback (als alles faalt)
+    let USD_TO_EUR = 0.92;
+    let FX_DATE = null;
+
+    // Dropdown vullen (vaste volgorde)
+    const modelOrder = [
+      "gpt-5.2",
+      "gpt-5-nano",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano"
+    ];
+
     const modelSelect = document.getElementById("modelSelect");
-    for (let model in MODEL_PRICES) {
-      let opt = document.createElement("option");
+    modelOrder.forEach(model => {
+      const opt = document.createElement("option");
       opt.value = model;
       opt.textContent = model;
       modelSelect.appendChild(opt);
+    });
+
+    function readFxCache() {
+      try {
+        const rate = parseFloat(localStorage.getItem(FX_STORAGE_KEY));
+        const date = localStorage.getItem(FX_DATE_KEY);
+        if (!Number.isNaN(rate) && rate > 0) {
+          USD_TO_EUR = rate;
+          FX_DATE = date || null;
+        }
+      } catch (_) {}
+    }
+
+    function writeFxCache(rate, dateStr) {
+      try {
+        localStorage.setItem(FX_STORAGE_KEY, String(rate));
+        if (dateStr) localStorage.setItem(FX_DATE_KEY, dateStr);
+      } catch (_) {}
+    }
+
+    async function refreshFxRate() {
+      // Start met cache zodat je direct iets ziet
+      readFxCache();
+
+      try {
+        const res = await fetch(FX_ENDPOINT, { cache: "no-store" });
+        if (!res.ok) throw new Error("FX fetch failed");
+        const data = await res.json();
+
+        // Verwachte shape: { amount, base:"USD", date:"YYYY-MM-DD", rates:{ EUR: <number> } }
+        const rate = data?.rates?.EUR;
+        if (typeof rate !== "number" || rate <= 0) throw new Error("Invalid FX payload");
+
+        USD_TO_EUR = rate;
+        FX_DATE = data?.date || null;
+        writeFxCache(USD_TO_EUR, FX_DATE);
+      } catch (_) {
+        // Als fetch faalt, blijven we op cache (of fallback default)
+      } finally {
+        calculate();
+      }
     }
 
     function calculate() {
@@ -70,8 +136,12 @@
       const totalOutput = tokens.output * nCv;
 
       const prices = MODEL_PRICES[model];
-      const costUSD = (totalInput/1_000_000)*prices.input + (totalOutput/1_000_000)*prices.output;
+      const costUSD = (totalInput / 1_000_000) * prices.input + (totalOutput / 1_000_000) * prices.output;
       const costEUR = costUSD * USD_TO_EUR;
+
+      const fxLine = FX_DATE
+        ? `Koers (USD→EUR): ${USD_TO_EUR.toFixed(6)} <span class="muted">(datum: ${FX_DATE})</span>`
+        : `Koers (USD→EUR): ${USD_TO_EUR.toFixed(6)} <span class="muted">(fallback/cache)</span>`;
 
       document.getElementById("result").innerHTML = `
         <b>Resultaat:</b><br>
@@ -80,12 +150,16 @@
         Aantal CV's: ${nCv}<br>
         Input tokens totaal: ${totalInput.toLocaleString()}<br>
         Output tokens totaal: ${totalOutput.toLocaleString()}<br>
-        Kosten: $${costUSD.toFixed(2)} ≈ €${costEUR.toFixed(2)}
+        Kosten: $${costUSD.toFixed(2)} ≈ €${costEUR.toFixed(2)}<br>
+        <div class="muted">${fxLine}</div>
       `;
     }
 
     document.querySelectorAll("input, select").forEach(el => el.addEventListener("input", calculate));
-    calculate();
+
+    // Init
+    calculate();        // direct tonen (met fallback/cache)
+    refreshFxRate();    // daarna koers updaten en opnieuw rekenen
   </script>
 </body>
 </html>
